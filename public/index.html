@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Streamoid Catalog</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=4" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Streamoid Catalog</h1>
+      </header>
+
+      <section class="upload card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2 style="margin:0">Upload CSV</h2>
+          <div class="footer-note"><span style="color:red; font-weight:600">NOTE:</span> CSV must include sku,name,brand,mrp,price</div>
+        </div>
+        <form id="uploadForm" style="margin-top:12px">
+          <input type="file" id="file" name="file" accept=".csv" style="display:none" />
+          <div class="drop-placeholder">Browse <br/> or <br/> drag n drop</div>
+          <!-- file metadata and progress -->
+          <div id="fileMeta" class="file-meta" style="display:none">
+            <div id="fileName" class="file-name">No file selected</div>
+            <div id="uploadProgress" class="progress" aria-hidden="true">
+              <div class="progress-bar" style="width:0%"></div>
+            </div>
+          </div>
+          <div class="file-actions">
+            <button type="submit" class="btn">Upload</button>
+            <button type="button" id="clearUpload" class="btn" style="background:#6b7280;margin-left:8px">Clear</button>
+          </div>
+        </form>
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px">
+          <div id="uploadResult" class="result"></div>
+          <div id="uploadLoader" class="loader" style="display:none" title="Uploading"></div>
+        </div>
+      </section>
+
+      <section class="search card" style="margin-top:18px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h2 style="margin:0">Search & Browse</h2>
+          <div class="page-controls">
+            <span id="pageInfo">Page 1</span>
+          </div>
+        </div>
+
+        <div class="filters" style="margin-top:12px">
+          <input id="brand" placeholder="brand" />
+          <input id="color" placeholder="color" />
+          <input id="minPrice" placeholder="min price" type="number" />
+          <input id="maxPrice" placeholder="max price" type="number" />
+          <button id="searchBtn" class="btn">Search</button>
+          <button id="clearFilters" class="btn" style="background:#6b7280">Clear</button>
+          <button id="clearAllBtn" class="btn" style="background:#ef4444;margin-left:8px">Clear All</button>
+        </div>
+
+        <div id="activeFilters" style="margin-top:10px"></div>
+
+        <div id="products" class="products-grid" style="margin-top:12px"></div>
+
+        <div class="pagination" style="margin-top:14px;align-items:center">
+          <button id="prev" class="btn">Prev</button>
+          <div id="pageButtons"></div>
+          <button id="next" class="btn">Next</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="/app.js?v=4"></script>
+  </body>
+</html>

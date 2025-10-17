@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+*.tsbuildinfo
+# Note: deployment platforms will build dist/ automatically
+
+# Database
+data/*.db
+data/*.db-*
+
+# Temporary files
+tmp/*
+!tmp/.gitkeep
+!tmp/README.md
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
