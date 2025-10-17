@@ -36,7 +36,7 @@ This README documents how to run the project locally, how the CSV is validated a
    Create a `.env` file or set `DATABASE_URL` in your environment. Example (local dev):
 
    ```text
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/streamoid
+   DATABASE_URL=postgresql://PASSWORD:postgres@localhost:5432/streamoid
    ```
 
 3. Start dev server:
