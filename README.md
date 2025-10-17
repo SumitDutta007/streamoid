@@ -1,252 +1,292 @@
-# Streamoid - Product CSV Upload API
+# Streamoid — Product CSV Upload API
 
-Backend service for managing product catalogs via CSV uploads. Built with Node.js, Express, and SQLite, optimized to handle millions of records efficiently.
+This repository is the Streamoid product catalog service: a TypeScript + Express backend that accepts CSV uploads, validates and stores product rows in PostgreSQL, and exposes paginated listing and search APIs. A small single-page frontend in `public/` provides an upload UI, progress, and product browsing for manual testing.
 
-## 📋 Features
+This README documents how to run the project locally, how the CSV is validated and stored, the HTTP API, and Docker notes.
 
-- ✅ **CSV Upload & Validation** - Parse and validate product data with detailed error reporting
-- ✅ **RESTful APIs** - List, search, and filter products
-- ✅ **Duplicate Handling** - Intelligently handle duplicate SKUs (update or skip)
-- ✅ **Streaming Processing** - Handle files with millions of rows without memory overflow
-- ✅ **High Performance** - Process 50,000+ rows/second
-- ✅ **Database Indexing** - Fast search queries even with large datasets
-- ✅ **Web UI** - User-friendly interface for testing
-- ✅ **Dockerized** - Easy deployment
+## Key features
 
-## 🚀 Quick Start
+- Streamed CSV parsing for large files (uses `csv-parse`)
+- Batched bulk upserts to PostgreSQL (`pg` + `pg-format`) to handle large imports
+- Per-row validation with detailed failure reporting
+- Paginated listing and filtered search endpoints
+- Minimal frontend in `public/` to upload files and browse results
+- Docker & Docker Compose support for easy local deployment
 
-### Option 1: Run Locally
+## Quick facts (what the code actually does)
 
-```bash
-# Install dependencies
-npm install
+- Server entry: `src/index.ts` (listens on `process.env.PORT || 8000`)
+- Upload endpoint: POST `/api/upload` and `/upload` (multipart form, field `file`)
+- List endpoint: GET `/api/products` (page & limit)
+- Search endpoint: GET `/api/products/search` (brand, color, minPrice, maxPrice, page, limit)
+- Utility: DELETE `/api/products` — truncates the `products` table (useful for tests/dev)
+- DB initialization: `src/db.ts` creates `products` table and indexes at startup
+- CSV parsing & validation: `src/utils/parseCsv.ts` (streamed parser and `validateRow`)
 
-# Start development server
-npm run dev
+## Run locally (dev)
 
-# Server runs on http://localhost:8000
+1. Install dependencies:
+
+   ```powershell
+   npm install
+   ```
+
+2. Ensure PostgreSQL is available and `DATABASE_URL` is set (or running on localhost:5432)
+
+   Create a `.env` file or set `DATABASE_URL` in your environment. Example (local dev):
+
+   ```text
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/streamoid
+   ```
+
+3. Start dev server:
+
+   ```powershell
+   npm run dev
+   # Server listens on PORT (default 8000)
+   ```
+
+4. Open the frontend: http://localhost:8000 (the SPA is served from `public/`)
+
+## Docker / Docker Compose
+
+This project includes a `Dockerfile` and a `docker-compose.yml` (app + Postgres). Default app listens on container port `8000`.
+
+Build & run with compose:
+
+```powershell
+docker compose up -d --build
 ```
 
-### Option 2: Run with Docker
+Check logs:
 
-```bash
-# Build image
-docker build -t streamoid-catalog .
-
-# Run container
-docker run -p 8000:8000 -v $(pwd)/data:/app/data streamoid-catalog
-
-# Server runs on http://localhost:8000
+```powershell
+docker compose logs -f
 ```
 
-## 📚 API Documentation
+Stop and remove volumes (reset DB):
 
-See [API.md](API.md) for complete API reference with examples.
-
-### Quick Reference
-
-**Upload CSV:**
-```bash
-curl -X POST -F "file=@products.csv" http://localhost:8000/upload
+```powershell
+docker compose down -v
 ```
 
-**List Products:**
-```bash
-curl "http://localhost:8000/products?page=1&limit=20"
+Note: Some Windows/OneDrive setups cause Docker/BuildKit to fail reading the build context. If you get errors like "failed to read dockerfile" or ".dockerignore invalid file request", copy the repo to a local non-synced path (for example `C:\streamoid`) and build from there.
+
+## API reference
+
+All examples assume the server root (http://localhost:8000) and the routes are exposed under `/api` and root (for compatibility). Replace host/port if you configured differently.
+
+Common endpoints and examples
+
+0) GET /health
+
+- Simple health check. Returns HTTP 200 + body `OK`.
+
+Example:
+
+```powershell
+curl -i http://localhost:8000/health
 ```
 
-**Search Products:**
-```bash
-curl "http://localhost:8000/products/search?brand=StreamThreads&maxPrice=1000"
+Response (200):
+
+```
+OK
 ```
 
-**Response Example:**
+1) POST /api/upload (or /upload)
+
+- Accepts: multipart/form-data under field `file` (CSV file)
+- Behavior: streams the CSV, validates each row, batches valid rows (default batch ~1000) and performs bulk `INSERT ... ON CONFLICT (sku) DO UPDATE` upserts
+- Response: JSON `{ stored, updated, failed, items }` where `failed` is an array of { row, errors } and `items` is a small sample of recently inserted rows
+
+Example request (curl):
+
+```powershell
+curl -v -X POST -F "file=@tmp/sample_products_10.csv" http://localhost:8000/api/upload
+```
+
+Example response (200):
+
 ```json
 {
-  "items": [
-    {
-      "sku": "TSHIRT-RED-001",
-      "name": "Classic Cotton T-Shirt",
-      "brand": "StreamThreads",
-      "color": "Red",
-      "size": "M",
-      "mrp": 799,
-      "price": 499,
-      "quantity": 20
-    }
-  ],
-  "total": 150
+   "stored": 8,
+   "updated": 0,
+   "failed": [
+      { "row": 3, "errors": ["price must be <= mrp"] }
+   ],
+   "items": [
+      { "sku": "TSHIRT-RED-001", "name": "Classic T-Shirt", "brand": "StreamThreads", "price": 499 }
+   ]
 }
 ```
 
-## ✅ Validation Rules
+2) GET /api/products
 
-- `price` must be ≤ `mrp`
-- `quantity` must be ≥ 0
-- **Required fields:** `sku`, `name`, `brand`, `mrp`, `price`
-- **Optional fields:** `color`, `size`, `quantity` (defaults to 0)
+- Query params: `page` (default 1), `limit` (default 20)
+- Response: `{ items: [ ...rows... ], total: <number> }`
 
-Invalid rows are not stored; they're returned in the `failed` array with detailed error messages.
+Example request:
 
-## 🧪 Testing
+```powershell
+curl -s "http://localhost:8000/api/products?page=1&limit=5" | jq .
+```
 
-### Run Unit Tests
+Example response:
 
-```bash
+```json
+{
+   "items": [
+      { "sku": "TSHIRT-RED-001", "name": "Classic T-Shirt", "brand": "StreamThreads", "mrp": 799, "price": 499, "quantity": 20 }
+   ],
+   "total": 123
+}
+```
+
+3) GET /api/products/search
+
+- Query params: `brand`, `color`, `minPrice`, `maxPrice`, `page`, `limit`
+- Behavior: Filters are combinable. `brand` and `color` are matched exactly (case-sensitive in current implementation; trim whitespace). Price filters are numeric.
+- Response: `{ items: [...], total: <number> }`
+
+Example: search by brand + price range
+
+```powershell
+curl -s "http://localhost:8000/api/products/search?brand=StreamThreads&minPrice=100&maxPrice=1000&page=1&limit=10" | jq .
+```
+
+Example response:
+
+```json
+{
+   "items": [
+      { "sku": "TSHIRT-RED-001", "name": "Classic T-Shirt", "brand": "StreamThreads", "mrp": 799, "price": 499, "quantity": 20 }
+   ],
+   "total": 2
+}
+```
+
+4) DELETE /api/products
+
+- Utility endpoint that truncates the `products` table and returns `{ deleted: <count> }`.
+
+Example request (clear DB - dev only):
+
+```powershell
+curl -X DELETE http://localhost:8000/api/products
+```
+
+Example response:
+
+```json
+{ "deleted": 123 }
+```
+
+## CSV format and validation
+
+- Required headers (case-sensitive keys used by parser): `sku`, `name`, `brand`, `mrp`, `price`
+- Optional headers: `color`, `size`, `quantity` (defaults to 0 when missing)
+- Numeric fields: `mrp`, `price`, `quantity` are parsed as numbers (integers).
+
+Validation rules implemented in `src/utils/parseCsv.ts`:
+
+- `sku`, `name`, `brand`, `mrp`, `price` must be present (non-empty)
+- `mrp` and `price` must be numbers
+- `price` must be <= `mrp`
+- `quantity` must be a number >= 0 (defaults to 0)
+
+Notes:
+
+- If a row is invalid, it is not stored; it is appended to the `failed` array returned by the upload endpoint with a row number and list of error messages.
+- Duplicate SKUs within the same upload are ignored (first occurrence kept); duplicates that already exist in the DB are upserted.
+
+Example CSV header + row:
+
+```
+sku,name,brand,color,size,mrp,price,quantity
+TSHIRT-RED-001,Classic T-Shirt,StreamThreads,Red,M,799,499,20
+```
+
+## Database schema
+
+`src/db.ts` initializes the `products` table on startup (if not exists) with columns:
+
+- sku TEXT PRIMARY KEY
+- name TEXT NOT NULL
+- brand TEXT NOT NULL
+- color TEXT
+- size TEXT
+- mrp INTEGER NOT NULL
+- price INTEGER NOT NULL
+- quantity INTEGER NOT NULL
+
+It also creates indexes on `brand`, `color`, `price`, and `brand, price` to speed up queries.
+
+If you prefer decimal prices, update `src/db.ts` and `validateRow` to use `NUMERIC` instead of `INTEGER` and adjust parsing.
+
+## Frontend
+
+The static SPA is in `public/` and served by the Express server. It provides:
+
+- File picker and drag-drop upload
+- Upload progress and simple validation feedback
+- Paginated product list and search UI
+
+Open the SPA at `http://localhost:8000` (or the mapped host port when using Docker Compose).
+
+## Tests
+
+The project uses Jest (TypeScript preset). Run tests with:
+
+```powershell
 npm test
 ```
 
-The test suite includes comprehensive tests for:
-- CSV parsing functionality
-- Data validation rules
-- Required field validation
-- Price and quantity constraints
-- Edge cases and error scenarios
+The `__tests__/` folder contains unit tests (CSV parsing, validation). For integration tests you can use the `DELETE /api/products` endpoint to reset DB state and then POST to `/api/upload` with small CSVs under `tmp/`.
 
-### Manual Testing
+## Performance notes and tuning
 
-1. **Using the Web UI:**
-   - Open `http://localhost:8000` in your browser
-   - Upload CSV files through the interface
-   - View products in a table
-   - Apply search filters
+- CSV parsing is stream-based to keep memory usage low.
+- Bulk insert batch size is set in `src/routes/upload.ts` (variable `BATCH`, default 1000). Reduce for smaller DBs or increase if your DB can handle larger transactions.
+- `pg-format` is used to build fast multi-row INSERT statements.
 
-2. **Using cURL:**
-   ```bash
-   # Upload sample file
-   curl -X POST -F "file=@sample_products.csv" http://localhost:8000/upload
-   
-   # List products
-   curl http://localhost:8000/products
-   
-   # Search by brand
-   curl "http://localhost:8000/products/search?brand=StreamThreads"
-   ```
+## Troubleshooting
 
-## 🛠️ Development
+- Docker build errors from OneDrive: copy repository to a local path (e.g., `C:\streamoid`) and run `docker compose up -d --build` from there; OneDrive file locks can break BuildKit.
+- TypeScript errors inside Docker about missing typings for native modules (`pg`, `pg-format`): add `@types/pg` and `@types/pg-format` to devDependencies and run `npm install` locally, then rebuild.
+- If uploads fail with "invalid input syntax for type integer" for price/mrp, ensure the CSV provides integer values (current schema uses INTEGER). Either send integer prices or change DB/validator to use NUMERIC.
 
-### Available Scripts
+## Helpful commands (PowerShell)
 
-```bash
-npm run dev            # Start development server with auto-reload
-npm run build          # Build TypeScript to dist/
-npm start              # Run production build
-npm test               # Run unit tests
-npm run cleanup        # Clean tmp/ directory
-npm run cleanup:all    # Clean tmp/, dist/, and database
+```powershell
+# start dev server
+npm run dev
+
+# build production
+npm run build && npm start
+
+# run docker compose
+docker compose up -d --build
+
+# reset DB volume and stop
+docker compose down -v
+
+# upload a sample file
+curl -X POST -F "file=@tmp/sample_products_100.csv" http://localhost:8000/api/upload
+
+# list products
+curl "http://localhost:8000/api/products?page=1&limit=20"
 ```
 
-### Project Structure
+## Where to look in the code
 
-```
-streamoid/
-├── src/
-│   ├── index.ts           # Express server entry point
-│   ├── db.ts              # Database connection and schema
-│   ├── routes/
-│   │   ├── upload.ts      # CSV upload endpoint
-│   │   └── products.ts    # Product list/search endpoints
-│   └── utils/
-│       └── parseCsv.ts    # CSV parsing and validation
-├── public/                # Frontend UI files
-├── __tests__/             # Unit tests
-├── scripts/               # Utility scripts
-├── data/                  # SQLite database storage
-└── tmp/                   # Temporary upload directory
-```
+- API entry: `src/index.ts`
+- Upload handler: `src/routes/upload.ts`
+- Product listing/search: `src/routes/products.ts`
+- DB init & connection: `src/db.ts`
+- CSV parse & validate: `src/utils/parseCsv.ts`
+- Frontend: `public/index.html`, `public/app.js`, `public/styles.css`
 
-## Performance Testing
+## License
 
-Generate large test CSV files for performance testing:
-
-```bash
-# Generate 100,000 rows (default)
-node scripts/generate_test_csv.js
-
-# Generate 1,000,000 rows
-node scripts/generate_test_csv.js 1000000
-
-# Generate 10,000,000 rows
-node scripts/generate_test_csv.js 10000000
-```
-
-Then test processing:
-```bash
-# Update csvPath in process_csv_direct.js to point to the generated file
-node process_csv_direct.js
-```
-
-Expected performance: **50,000+ rows/second** on modern hardware.
-
-## 📦 Deliverables Checklist
-
-✅ **All Core Requirements Met:**
-
-1. **CSV Upload & Storage**
-   - ✅ `POST /upload` endpoint
-   - ✅ CSV file parsing
-   - ✅ Row validation (price ≤ mrp, quantity ≥ 0, required fields)
-   - ✅ Store valid rows in SQLite database
-   - ✅ Return failed rows with error details
-
-2. **List Products**
-   - ✅ `GET /products` endpoint
-   - ✅ Pagination support (page, limit)
-   - ✅ Returns product array with total count
-
-3. **Search Products**
-   - ✅ `GET /products/search` endpoint
-   - ✅ Filter by brand
-   - ✅ Filter by color
-   - ✅ Filter by price range (minPrice, maxPrice)
-   - ✅ Combinable filters
-
-**Bonus Features Implemented:**
-
-- ✅ **Unit Tests** - Comprehensive test coverage for CSV parsing and validation
-- ✅ **Dockerized Solution** - Ready-to-run Docker container
-- ✅ **Performance Optimizations** - Handles millions of records efficiently
-- ✅ **Web UI** - User-friendly frontend for manual testing
-- ✅ **Duplicate Handling** - Intelligent SKU duplicate detection
-- ✅ **API Documentation** - Complete API reference with examples
-- ✅ **Database Indexing** - Optimized search performance
-
-## 📖 Documentation
-
-- **[API.md](API.md)** - Complete API reference with request/response examples
-- **[OPTIMIZATION.md](OPTIMIZATION.md)** - Performance optimization details
-- **[tmp/README.md](tmp/README.md)** - Temporary directory documentation
-
-## 🐳 Docker Deployment
-
-```bash
-# Build
-docker build -t streamoid-catalog .
-
-# Run with volume mount for persistence
-docker run -p 8000:8000 -v $(pwd)/data:/app/data streamoid-catalog
-
-# Run without persistence
-docker run -p 8000:8000 streamoid-catalog
-```
-
-## 📝 Notes
-
-- Server listens on port 8000 by default (configurable via `PORT` environment variable)
-- Database stored at `data/products.db` (SQLite)
-- API routes available under both `/` and `/api/` for compatibility
-- Frontend UI available at `http://localhost:8000`
-- Temporary uploads stored in `tmp/` and auto-deleted after processing
-
-## 🤝 Contributing
-
-The codebase follows clean, modular architecture:
-- Separation of concerns (routes, database, utilities)
-- TypeScript for type safety
-- Comprehensive error handling
-- Detailed logging
-- Unit tests for core functionality
-
-## 📄 License
-
-This project was created as a technical assessment for Streamoid Technologies.
+This project is provided for evaluation purposes. No additional license specified.
